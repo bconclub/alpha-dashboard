@@ -135,28 +135,32 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
   const buildInitialFeed = useCallback((trades: Trade[], logs: StrategyLog[]) => {
     const events: ActivityEvent[] = [];
 
-    for (const trade of trades.slice(0, 30)) {
+    // Trades always have pair and exchange — reliable source
+    for (const trade of trades.slice(0, 40)) {
+      const exchangeLabel = trade.exchange === 'delta' ? ' on Delta' : '';
       if (trade.status === 'open') {
         const isFuturesShort = trade.position_type === 'short';
         const type: ActivityEventType = isFuturesShort ? 'short_open' : 'trade_open';
         const label = isFuturesShort
-          ? `SHORT ${trade.pair} @ $${trade.price.toLocaleString()}`
-          : `LONG ${trade.pair} @ $${trade.price.toLocaleString()}`;
+          ? `SHORT ${trade.pair} @ $${trade.price.toLocaleString()}${exchangeLabel}`
+          : `${trade.side.toUpperCase()} ${trade.pair} @ $${trade.price.toLocaleString()} — ${trade.strategy}`;
         events.push(buildActivityEvent(type, trade, label));
       } else if (trade.status === 'closed') {
-        const pctLabel = trade.pnl >= 0 ? `+${trade.pnl.toFixed(2)}%` : `${trade.pnl.toFixed(2)}%`;
+        const pnlLabel = trade.pnl >= 0 ? `+$${trade.pnl.toFixed(2)}` : `-$${Math.abs(trade.pnl).toFixed(2)}`;
         events.push(
-          buildActivityEvent('trade_close', trade, `${trade.pair} closed — ${pctLabel} P&L`),
+          buildActivityEvent('trade_close', trade, `${trade.pair} closed — ${pnlLabel} P&L`),
         );
       }
     }
 
+    // Strategy logs — include all, use pair if available
     for (const log of logs.slice(0, 20)) {
+      const pairLabel = log.pair || 'Market';
       events.push(
         buildActivityEvent(
           'analysis',
           log,
-          `${log.pair ?? 'Market'} analyzed — ${log.market_condition}, strategy: ${log.strategy_selected}`,
+          `${pairLabel} analyzed — ${log.market_condition}, strategy: ${log.strategy_selected}`,
         ),
       );
     }

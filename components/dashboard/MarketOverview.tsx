@@ -3,8 +3,25 @@
 import { useMemo, useState } from 'react';
 import { useSupabase } from '@/components/providers/SupabaseProvider';
 import { Badge } from '@/components/ui/Badge';
-import { formatNumber, formatPercentage, formatTimeAgo, cn } from '@/lib/utils';
+import { formatNumber, formatPnL, formatTimeAgo, cn } from '@/lib/utils';
 import type { StrategyLog } from '@/lib/types';
+
+interface PairRow {
+  pair: string;
+  exchange: 'binance' | 'delta';
+  currentPrice: number | null;
+  priceChange15m: number | null;
+  marketCondition: string;
+  strategy: string;
+  adx: number | null;
+  rsi: number | null;
+  signalStrength: number;
+  lastTimestamp: string;
+  totalPnl: number;
+  tradeCount: number;
+  // For expanded view
+  log: StrategyLog | null;
+}
 
 function getConditionBadge(condition: string) {
   const c = condition?.toLowerCase() ?? '';
@@ -31,25 +48,26 @@ function SignalBar({ strength }: { strength: number }) {
   );
 }
 
-function ExpandedRow({ log }: { log: StrategyLog }) {
+function ExpandedRow({ row }: { row: PairRow }) {
+  const log = row.log;
   return (
     <tr>
       <td colSpan={9} className="p-0">
         <div className="bg-zinc-900/60 border-t border-zinc-800 px-6 py-3">
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 text-xs">
-            {log.macd_value != null && (
+            {log?.macd_value != null && (
               <div>
                 <span className="text-zinc-500">MACD</span>
                 <span className="ml-2 font-mono text-zinc-300">{log.macd_value.toFixed(4)}</span>
               </div>
             )}
-            {log.macd_signal != null && (
+            {log?.macd_signal != null && (
               <div>
                 <span className="text-zinc-500">Signal</span>
                 <span className="ml-2 font-mono text-zinc-300">{log.macd_signal.toFixed(4)}</span>
               </div>
             )}
-            {log.macd_histogram != null && (
+            {log?.macd_histogram != null && (
               <div>
                 <span className="text-zinc-500">Histogram</span>
                 <span className={cn('ml-2 font-mono', log.macd_histogram >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]')}>
@@ -57,30 +75,41 @@ function ExpandedRow({ log }: { log: StrategyLog }) {
                 </span>
               </div>
             )}
-            {log.bb_upper != null && (
+            {log?.bb_upper != null && (
               <div>
                 <span className="text-zinc-500">BB Upper</span>
                 <span className="ml-2 font-mono text-zinc-300">{formatNumber(log.bb_upper)}</span>
               </div>
             )}
-            {log.bb_lower != null && (
+            {log?.bb_lower != null && (
               <div>
                 <span className="text-zinc-500">BB Lower</span>
                 <span className="ml-2 font-mono text-zinc-300">{formatNumber(log.bb_lower)}</span>
               </div>
             )}
-            {log.atr != null && (
+            {log?.atr != null && (
               <div>
                 <span className="text-zinc-500">ATR</span>
                 <span className="ml-2 font-mono text-zinc-300">{log.atr.toFixed(2)}</span>
               </div>
             )}
-            {log.volume_ratio != null && (
+            {log?.volume_ratio != null && (
               <div>
                 <span className="text-zinc-500">Vol Ratio</span>
                 <span className="ml-2 font-mono text-zinc-300">{log.volume_ratio.toFixed(2)}x</span>
               </div>
             )}
+            {/* Always show trade stats */}
+            <div>
+              <span className="text-zinc-500">Trades</span>
+              <span className="ml-2 font-mono text-zinc-300">{row.tradeCount}</span>
+            </div>
+            <div>
+              <span className="text-zinc-500">P&L</span>
+              <span className={cn('ml-2 font-mono', row.totalPnl >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]')}>
+                {formatPnL(row.totalPnl)}
+              </span>
+            </div>
           </div>
         </div>
       </td>
@@ -89,22 +118,83 @@ function ExpandedRow({ log }: { log: StrategyLog }) {
 }
 
 export function MarketOverview() {
-  const { strategyLog } = useSupabase();
+  const { strategyLog, trades } = useSupabase();
   const [expandedPair, setExpandedPair] = useState<string | null>(null);
 
-  // Get latest log per pair, sorted by signal strength
+  // Build pair data from TRADES (always have pair + exchange), enriched with strategy_log when available
   const pairData = useMemo(() => {
-    const latestByPair = new Map<string, StrategyLog>();
-    for (const log of strategyLog) {
-      const key = log.pair ?? 'unknown';
-      if (!latestByPair.has(key)) {
-        latestByPair.set(key, log);
+    // Step 1: Get all unique pairs from trades
+    const pairMap = new Map<string, {
+      pair: string;
+      exchange: 'binance' | 'delta';
+      lastPrice: number;
+      lastTimestamp: string;
+      totalPnl: number;
+      tradeCount: number;
+      lastStrategy: string;
+    }>();
+
+    for (const trade of trades) {
+      const key = `${trade.pair}-${trade.exchange}`;
+      const existing = pairMap.get(key);
+      if (!existing) {
+        pairMap.set(key, {
+          pair: trade.pair,
+          exchange: trade.exchange,
+          lastPrice: trade.price,
+          lastTimestamp: trade.timestamp,
+          totalPnl: trade.pnl,
+          tradeCount: 1,
+          lastStrategy: trade.strategy,
+        });
+      } else {
+        existing.totalPnl += trade.pnl;
+        existing.tradeCount += 1;
+        if (new Date(trade.timestamp) > new Date(existing.lastTimestamp)) {
+          existing.lastPrice = trade.price;
+          existing.lastTimestamp = trade.timestamp;
+          existing.lastStrategy = trade.strategy;
+        }
       }
     }
-    const entries = Array.from(latestByPair.values());
-    entries.sort((a, b) => (b.signal_strength ?? 0) - (a.signal_strength ?? 0));
-    return entries;
-  }, [strategyLog]);
+
+    // Step 2: Match strategy_log entries by pair (if they have `pair` populated)
+    const logByPair = new Map<string, StrategyLog>();
+    for (const log of strategyLog) {
+      if (log.pair) {
+        const key = `${log.pair}-${log.exchange ?? 'binance'}`;
+        if (!logByPair.has(key)) {
+          logByPair.set(key, log);
+        }
+      }
+    }
+
+    // Step 3: Build rows
+    const rows: PairRow[] = [];
+    const pairEntries = Array.from(pairMap.entries());
+    for (const [key, data] of pairEntries) {
+      const log = logByPair.get(key) ?? null;
+      rows.push({
+        pair: data.pair,
+        exchange: data.exchange,
+        currentPrice: log?.current_price ?? data.lastPrice,
+        priceChange15m: log?.price_change_15m ?? null,
+        marketCondition: log?.market_condition ?? 'sideways',
+        strategy: log?.strategy_selected ?? data.lastStrategy,
+        adx: log?.adx ?? null,
+        rsi: log?.rsi ?? null,
+        signalStrength: log?.signal_strength ?? 0,
+        lastTimestamp: log?.timestamp ?? data.lastTimestamp,
+        totalPnl: data.totalPnl,
+        tradeCount: data.tradeCount,
+        log,
+      });
+    }
+
+    // Sort by signal strength, then by trade count
+    rows.sort((a, b) => (b.signalStrength - a.signalStrength) || (b.tradeCount - a.tradeCount));
+    return rows;
+  }, [strategyLog, trades]);
 
   return (
     <div className="bg-[#0d1117] border border-zinc-800 rounded-xl p-5 overflow-hidden">
@@ -122,7 +212,7 @@ export function MarketOverview() {
                 <th className="pb-2 pr-3 font-medium">Pair</th>
                 <th className="pb-2 pr-3 font-medium w-6">Ex</th>
                 <th className="pb-2 pr-3 font-medium text-right">Price</th>
-                <th className="pb-2 pr-3 font-medium text-right">15m %</th>
+                <th className="pb-2 pr-3 font-medium text-right">P&L</th>
                 <th className="pb-2 pr-3 font-medium">Condition</th>
                 <th className="pb-2 pr-3 font-medium">Strategy</th>
                 <th className="pb-2 pr-3 font-medium text-right">ADX</th>
@@ -130,92 +220,84 @@ export function MarketOverview() {
                 <th className="pb-2 font-medium">Signal</th>
               </tr>
             </thead>
-            <tbody>
-              {pairData.map((log) => {
-                const pairKey = log.pair ?? 'unknown';
-                const condition = getConditionBadge(log.market_condition);
-                const isExpanded = expandedPair === pairKey;
+            {pairData.map((row) => {
+              const condition = getConditionBadge(row.marketCondition);
+              const isExpanded = expandedPair === `${row.pair}-${row.exchange}`;
 
-                // Row tint
-                const rsi = log.rsi ?? 50;
-                const rowTint =
-                  rsi < 40 ? 'bg-[#00c853]/[0.03]' :
-                  rsi > 60 ? 'bg-[#ff1744]/[0.03]' :
-                  'bg-transparent';
+              const rsi = row.rsi ?? 50;
+              const rowTint =
+                rsi < 40 ? 'bg-[#00c853]/[0.03]' :
+                rsi > 60 ? 'bg-[#ff1744]/[0.03]' :
+                'bg-transparent';
 
-                return (
-                  <tbody key={pairKey}>
-                    <tr
-                      className={cn(
-                        'border-b border-zinc-800/50 cursor-pointer hover:bg-zinc-800/30 transition-colors',
-                        rowTint,
-                      )}
-                      onClick={() => setExpandedPair(isExpanded ? null : pairKey)}
-                    >
-                      <td className="py-2.5 pr-3 text-white font-medium whitespace-nowrap">
-                        {pairKey}
-                      </td>
-                      <td className="py-2.5 pr-3">
+              return (
+                <tbody key={`${row.pair}-${row.exchange}`}>
+                  <tr
+                    className={cn(
+                      'border-b border-zinc-800/50 cursor-pointer hover:bg-zinc-800/30 transition-colors',
+                      rowTint,
+                    )}
+                    onClick={() => setExpandedPair(isExpanded ? null : `${row.pair}-${row.exchange}`)}
+                  >
+                    <td className="py-2.5 pr-3 text-white font-medium whitespace-nowrap">
+                      {row.pair}
+                    </td>
+                    <td className="py-2.5 pr-3">
+                      <span
+                        className={cn(
+                          'inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold',
+                          row.exchange === 'binance'
+                            ? 'bg-[#f0b90b]/10 text-[#f0b90b]'
+                            : 'bg-[#00d2ff]/10 text-[#00d2ff]',
+                        )}
+                      >
+                        {row.exchange === 'binance' ? 'B' : 'D'}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-3 text-right font-mono text-zinc-300 whitespace-nowrap">
+                      {row.currentPrice != null ? `$${formatNumber(row.currentPrice)}` : '—'}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap">
+                      <span className={row.totalPnl >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]'}>
+                        {formatPnL(row.totalPnl)}
+                      </span>
+                    </td>
+                    <td className="py-2.5 pr-3">
+                      <Badge variant={condition.variant}>{condition.label}</Badge>
+                    </td>
+                    <td className="py-2.5 pr-3 text-zinc-300 text-xs">
+                      {row.strategy}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right font-mono text-zinc-300">
+                      {row.adx != null ? row.adx.toFixed(0) : '—'}
+                    </td>
+                    <td className="py-2.5 pr-3 text-right font-mono">
+                      {row.rsi != null ? (
                         <span
-                          className={cn(
-                            'inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold',
-                            log.exchange === 'binance'
-                              ? 'bg-[#f0b90b]/10 text-[#f0b90b]'
-                              : 'bg-[#00d2ff]/10 text-[#00d2ff]',
-                          )}
+                          className={
+                            row.rsi < 30 ? 'text-[#00c853]' :
+                            row.rsi > 70 ? 'text-[#ff1744]' :
+                            'text-zinc-300'
+                          }
                         >
-                          {log.exchange === 'binance' ? 'B' : 'D'}
+                          {row.rsi.toFixed(0)}
                         </span>
-                      </td>
-                      <td className="py-2.5 pr-3 text-right font-mono text-zinc-300 whitespace-nowrap">
-                        {log.current_price != null ? `$${formatNumber(log.current_price)}` : '—'}
-                      </td>
-                      <td className="py-2.5 pr-3 text-right font-mono whitespace-nowrap">
-                        {log.price_change_15m != null ? (
-                          <span className={log.price_change_15m >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]'}>
-                            {formatPercentage(log.price_change_15m)}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 pr-3">
-                        <Badge variant={condition.variant}>{condition.label}</Badge>
-                      </td>
-                      <td className="py-2.5 pr-3 text-zinc-300 text-xs">
-                        {log.strategy_selected}
-                      </td>
-                      <td className="py-2.5 pr-3 text-right font-mono text-zinc-300">
-                        {log.adx != null ? log.adx.toFixed(0) : '—'}
-                      </td>
-                      <td className="py-2.5 pr-3 text-right font-mono">
-                        {log.rsi != null ? (
-                          <span
-                            className={
-                              log.rsi < 30 ? 'text-[#00c853]' :
-                              log.rsi > 70 ? 'text-[#ff1744]' :
-                              'text-zinc-300'
-                            }
-                          >
-                            {log.rsi.toFixed(0)}
-                          </span>
-                        ) : (
-                          <span className="text-zinc-600">—</span>
-                        )}
-                      </td>
-                      <td className="py-2.5">
-                        <SignalBar strength={log.signal_strength ?? 0} />
-                      </td>
-                    </tr>
-                    {isExpanded && <ExpandedRow log={log} />}
-                  </tbody>
-                );
-              })}
-            </tbody>
+                      ) : (
+                        <span className="text-zinc-600">—</span>
+                      )}
+                    </td>
+                    <td className="py-2.5">
+                      <SignalBar strength={row.signalStrength} />
+                    </td>
+                  </tr>
+                  {isExpanded && <ExpandedRow row={row} />}
+                </tbody>
+              );
+            })}
           </table>
-          {pairData.length > 0 && pairData[0].timestamp && (
+          {pairData.length > 0 && pairData[0].lastTimestamp && (
             <p className="text-[10px] text-zinc-600 mt-3">
-              Last analysis: {formatTimeAgo(pairData[0].timestamp)}
+              Last activity: {formatTimeAgo(pairData[0].lastTimestamp)}
             </p>
           )}
         </div>

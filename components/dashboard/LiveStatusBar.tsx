@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useSupabase } from '@/components/providers/SupabaseProvider';
-import { formatCurrency, formatTimeAgo, cn } from '@/lib/utils';
+import { formatCurrency, formatPnL, formatTimeAgo, cn } from '@/lib/utils';
 
 function formatUptime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -17,9 +17,7 @@ function UTCClock() {
   useEffect(() => {
     const tick = () => {
       const now = new Date();
-      setTime(
-        now.toISOString().slice(11, 19) + ' UTC',
-      );
+      setTime(now.toISOString().slice(11, 19) + ' UTC');
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -32,21 +30,38 @@ function UTCClock() {
 }
 
 export function LiveStatusBar() {
-  const { botStatus, isConnected } = useSupabase();
+  const { botStatus, isConnected, pnlByExchange, trades } = useSupabase();
 
   const binanceConnected = botStatus?.binance_connected ?? isConnected;
   const deltaConnected = botStatus?.delta_connected ?? isConnected;
   const botState = botStatus?.bot_state ?? (isConnected ? 'running' : 'paused');
 
-  const binanceBalance = botStatus?.binance_balance ?? 0;
-  const deltaBalance = botStatus?.delta_balance ?? 0;
+  // Use per-exchange P&L view data as fallback for balances
+  const binancePnl = pnlByExchange.find((e) => e.exchange === 'binance');
+  const deltaPnl = pnlByExchange.find((e) => e.exchange === 'delta');
+
+  const binanceBalance = botStatus?.binance_balance || 0;
+  const deltaBalance = botStatus?.delta_balance || 0;
   const deltaBalanceInr = botStatus?.delta_balance_inr;
+
+  // Total capital: prefer bot_status.capital, then sum of exchange balances
   const totalCapital = botStatus?.capital ?? (binanceBalance + deltaBalance);
 
   const shortingEnabled = botStatus?.shorting_enabled ?? false;
   const leverageLevel = botStatus?.leverage_level ?? 1;
   const activeStrategiesCount = botStatus?.active_strategies_count ?? 0;
   const uptimeSeconds = botStatus?.uptime_seconds ?? 0;
+
+  // Total P&L from bot status
+  const totalPnL = botStatus?.total_pnl ?? 0;
+  const winRate = botStatus?.win_rate ?? 0;
+
+  // Count active strategies from trades if not provided
+  const derivedStrategyCount = useMemo(() => {
+    if (activeStrategiesCount > 0) return activeStrategiesCount;
+    const strategies = new Set(trades.filter((t) => t.status === 'open').map((t) => t.strategy));
+    return strategies.size || 1;
+  }, [activeStrategiesCount, trades]);
 
   // Heartbeat freshness
   const lastHeartbeat = botStatus?.timestamp;
@@ -72,10 +87,27 @@ export function LiveStatusBar() {
               <span className="text-sm font-semibold text-[#f0b90b]">BINANCE</span>
               <span className="text-[10px] text-zinc-500">(Spot)</span>
             </div>
-            <div className="flex items-baseline gap-3">
-              <span className="font-mono text-lg text-white">{formatCurrency(binanceBalance)}</span>
-              <span className="text-[10px] text-zinc-500">USDT</span>
-            </div>
+            {binanceBalance > 0 ? (
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-lg text-white">{formatCurrency(binanceBalance)}</span>
+                <span className="text-[10px] text-zinc-500">USDT</span>
+              </div>
+            ) : binancePnl ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-zinc-500">Trades:</span>
+                  <span className="font-mono text-zinc-300">{binancePnl.total_trades}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-zinc-500">P&L:</span>
+                  <span className={cn('font-mono', binancePnl.total_pnl >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]')}>
+                    {formatPnL(binancePnl.total_pnl)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <span className="text-xs text-zinc-500">No data</span>
+            )}
             {lastHeartbeat && (
               <p className="text-[10px] text-zinc-600 mt-1">{formatTimeAgo(lastHeartbeat)}</p>
             )}
@@ -93,12 +125,29 @@ export function LiveStatusBar() {
               <span className="text-sm font-semibold text-[#00d2ff]">DELTA</span>
               <span className="text-[10px] text-zinc-500">(Futures)</span>
             </div>
-            <div className="flex items-baseline gap-3">
-              <span className="font-mono text-lg text-white">{formatCurrency(deltaBalance)}</span>
-              {deltaBalanceInr != null && (
-                <span className="text-[10px] text-zinc-500">~INR {deltaBalanceInr.toLocaleString()}</span>
-              )}
-            </div>
+            {deltaBalance > 0 ? (
+              <div className="flex items-baseline gap-3">
+                <span className="font-mono text-lg text-white">{formatCurrency(deltaBalance)}</span>
+                {deltaBalanceInr != null && (
+                  <span className="text-[10px] text-zinc-500">~INR {deltaBalanceInr.toLocaleString()}</span>
+                )}
+              </div>
+            ) : deltaPnl ? (
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-zinc-500">Trades:</span>
+                  <span className="font-mono text-zinc-300">{deltaPnl.total_trades}</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-zinc-500">P&L:</span>
+                  <span className={cn('font-mono', deltaPnl.total_pnl >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]')}>
+                    {formatPnL(deltaPnl.total_pnl)}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <span className="text-xs text-zinc-500">No data</span>
+            )}
             {lastHeartbeat && (
               <p className="text-[10px] text-zinc-600 mt-1">{formatTimeAgo(lastHeartbeat)}</p>
             )}
@@ -111,7 +160,7 @@ export function LiveStatusBar() {
           <span className="font-mono text-xl font-bold text-white">
             {formatCurrency(totalCapital)}
           </span>
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-3 mt-1">
             <span
               className={cn(
                 'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium',
@@ -132,6 +181,11 @@ export function LiveStatusBar() {
               <span className="text-[10px] text-zinc-500">{formatUptime(uptimeSeconds)}</span>
             )}
           </div>
+          {totalPnL !== 0 && (
+            <span className={cn('text-xs font-mono mt-1', totalPnL >= 0 ? 'text-[#00c853]' : 'text-[#ff1744]')}>
+              {formatPnL(totalPnL)} | {winRate.toFixed(1)}% WR
+            </span>
+          )}
         </div>
 
         {/* Right: Indicators + Clock */}
@@ -149,7 +203,7 @@ export function LiveStatusBar() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-zinc-500">Strategies</span>
-              <span className="text-[#2196f3] font-mono">{activeStrategiesCount}</span>
+              <span className="text-[#2196f3] font-mono">{derivedStrategyCount}</span>
             </div>
           </div>
           <div className="border-l border-zinc-800 pl-4">

@@ -16,21 +16,19 @@ interface TriggerInfo {
   overallStatus: string;
   statusColor: string;
   nextAction: string;
+  hasIndicatorData: boolean;
 }
 
-function computeTrigger(log: StrategyLog): TriggerInfo {
-  const rsi = log.rsi ?? null;
-  const isFutures = log.exchange === 'delta';
-  const pair = log.pair ?? 'Unknown';
+function computeTrigger(pair: string, exchange: Exchange, log: StrategyLog | null): TriggerInfo {
+  const rsi = log?.rsi ?? null;
+  const isFutures = exchange === 'delta';
 
-  // For futures, check both long (RSI<30) and short (RSI>70)
-  // Pick whichever is closer
   let rsiTarget = 30;
   let rsiDirection: 'buy' | 'short' = 'buy';
   let rsiDistancePct = 100;
 
   if (rsi != null) {
-    const buyDistance = Math.max(0, ((rsi - 30) / 70) * 100); // % away from RSI 30
+    const buyDistance = Math.max(0, ((rsi - 30) / 70) * 100);
     const shortDistance = isFutures ? Math.max(0, ((70 - rsi) / 70) * 100) : 100;
 
     if (isFutures && shortDistance < buyDistance) {
@@ -44,14 +42,12 @@ function computeTrigger(log: StrategyLog): TriggerInfo {
     }
   }
 
-  // Use entry_distance_pct if provided
-  if (log.entry_distance_pct != null) {
+  if (log?.entry_distance_pct != null) {
     rsiDistancePct = log.entry_distance_pct;
   }
 
-  // MACD status
   let macdStatus = 'No data';
-  if (log.macd_histogram != null) {
+  if (log?.macd_histogram != null) {
     const hist = log.macd_histogram;
     if (Math.abs(hist) < 0.0005) {
       macdStatus = 'Converging — possible cross soon';
@@ -62,28 +58,29 @@ function computeTrigger(log: StrategyLog): TriggerInfo {
     }
   }
 
-  // Overall status
   let overallStatus = 'Watching';
   let statusColor = 'text-zinc-400';
-  let nextAction = 'No signal expected soon';
+  let nextAction = 'Monitoring — waiting for signals';
 
-  if (rsiDistancePct < 15) {
-    overallStatus = 'Imminent';
-    statusColor = 'text-[#00c853]';
-    nextAction = `${rsiDirection === 'short' ? 'Short' : 'Buy'} signal very close — RSI near ${rsiTarget}`;
-  } else if (rsiDistancePct < 40) {
-    overallStatus = 'Getting close';
-    statusColor = 'text-[#ffd600]';
-    nextAction = `${rsiDirection === 'short' ? 'Short' : 'Buy'} possible in ${rsiDistancePct < 25 ? '1-2' : '2-3'} candles`;
-  } else {
-    overallStatus = 'Watching';
-    statusColor = 'text-zinc-500';
-    nextAction = `Far from ${rsiDirection === 'short' ? 'short' : 'buy'} trigger — monitoring`;
+  if (rsi != null) {
+    if (rsiDistancePct < 15) {
+      overallStatus = 'Imminent';
+      statusColor = 'text-[#00c853]';
+      nextAction = `${rsiDirection === 'short' ? 'Short' : 'Buy'} signal very close — RSI near ${rsiTarget}`;
+    } else if (rsiDistancePct < 40) {
+      overallStatus = 'Getting close';
+      statusColor = 'text-[#ffd600]';
+      nextAction = `${rsiDirection === 'short' ? 'Short' : 'Buy'} possible in ${rsiDistancePct < 25 ? '1-2' : '2-3'} candles`;
+    } else {
+      overallStatus = 'Watching';
+      statusColor = 'text-zinc-500';
+      nextAction = `Far from ${rsiDirection === 'short' ? 'short' : 'buy'} trigger — monitoring`;
+    }
   }
 
   return {
     pair,
-    exchange: log.exchange,
+    exchange,
     rsi,
     rsiTarget,
     rsiDirection,
@@ -92,6 +89,7 @@ function computeTrigger(log: StrategyLog): TriggerInfo {
     overallStatus,
     statusColor,
     nextAction,
+    hasIndicatorData: rsi != null,
   };
 }
 
@@ -118,20 +116,46 @@ function ProximityBar({ distance }: { distance: number }) {
 }
 
 export function TriggerProximity() {
-  const { strategyLog } = useSupabase();
+  const { strategyLog, trades } = useSupabase();
 
   const triggers = useMemo(() => {
-    const latestByPair = new Map<string, StrategyLog>();
-    for (const log of strategyLog) {
-      const key = log.pair ?? 'unknown';
-      if (!latestByPair.has(key)) {
-        latestByPair.set(key, log);
+    // Get unique pairs from trades
+    const pairExchanges = new Map<string, { pair: string; exchange: Exchange }>();
+    for (const t of trades) {
+      const key = `${t.pair}-${t.exchange}`;
+      if (!pairExchanges.has(key)) {
+        pairExchanges.set(key, { pair: t.pair, exchange: t.exchange });
       }
     }
-    return Array.from(latestByPair.values())
-      .map(computeTrigger)
-      .sort((a, b) => a.rsiDistancePct - b.rsiDistancePct);
-  }, [strategyLog]);
+
+    // Match strategy_log entries by pair
+    const logByPair = new Map<string, StrategyLog>();
+    for (const log of strategyLog) {
+      if (log.pair) {
+        const key = `${log.pair}-${log.exchange ?? 'binance'}`;
+        if (!logByPair.has(key)) {
+          logByPair.set(key, log);
+        }
+      }
+    }
+
+    // Build triggers for all pairs
+    const results: TriggerInfo[] = [];
+    const pairEntries = Array.from(pairExchanges.entries());
+    for (const [key, { pair, exchange }] of pairEntries) {
+      const log = logByPair.get(key) ?? null;
+      results.push(computeTrigger(pair, exchange, log));
+    }
+
+    // Sort: pairs with indicator data first, then by distance
+    results.sort((a, b) => {
+      if (a.hasIndicatorData && !b.hasIndicatorData) return -1;
+      if (!a.hasIndicatorData && b.hasIndicatorData) return 1;
+      return a.rsiDistancePct - b.rsiDistancePct;
+    });
+
+    return results;
+  }, [strategyLog, trades]);
 
   return (
     <div className="bg-[#0d1117] border border-zinc-800 rounded-xl p-5">
@@ -140,12 +164,12 @@ export function TriggerProximity() {
       </h3>
 
       {triggers.length === 0 ? (
-        <p className="text-sm text-zinc-500 text-center py-8">No analysis data</p>
+        <p className="text-sm text-zinc-500 text-center py-8">No pairs tracked yet</p>
       ) : (
         <div className="space-y-3 max-h-[600px] overflow-y-auto pr-1">
           {triggers.map((t) => (
             <div
-              key={t.pair}
+              key={`${t.pair}-${t.exchange}`}
               className="bg-zinc-900/40 border border-zinc-800/50 rounded-lg p-3"
             >
               {/* Header */}
@@ -169,18 +193,20 @@ export function TriggerProximity() {
               </div>
 
               {/* RSI proximity */}
-              {t.rsi != null && (
+              {t.rsi != null ? (
                 <div className="mb-2">
                   <div className="flex items-center justify-between text-[11px]">
                     <span className="text-zinc-500">
                       RSI: <span className="font-mono text-zinc-300">{t.rsi.toFixed(0)}</span>
-                      {' → need '}
+                      {' \u2192 need '}
                       {t.rsiDirection === 'short' ? '>' : '<'}
                       {t.rsiTarget} for {t.rsiDirection}
                     </span>
                   </div>
                   <ProximityBar distance={t.rsiDistancePct} />
                 </div>
+              ) : (
+                <p className="text-[11px] text-zinc-600 mb-2">Awaiting indicator data from bot...</p>
               )}
 
               {/* MACD */}
