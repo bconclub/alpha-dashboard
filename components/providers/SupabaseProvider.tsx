@@ -82,6 +82,7 @@ export function SupabaseProvider({ children }: { children: ReactNode }) {
   const client = getSupabase();
 
   if (!client) {
+    console.warn('[Alpha] SupabaseProvider: no client — NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY missing');
     return (
       <SupabaseContext.Provider value={EMPTY_CONTEXT}>
         {children}
@@ -117,19 +118,36 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     const client = getSupabase();
     if (!client) return;
 
-    const [openRes, pnlExRes, futRes, dailyRes, stratPerfRes] = await Promise.all([
-      client.from('v_open_positions').select('*'),
-      client.from('v_pnl_by_exchange').select('*'),
-      client.from('v_futures_positions').select('*'),
-      client.from('v_daily_pnl_timeseries').select('*').order('trade_date', { ascending: true }),
-      client.from('v_strategy_performance').select('*'),
-    ]);
+    // Fetch each view independently — some may not exist yet
+    try {
+      const res = await client.from('v_open_positions').select('*');
+      if (res.data) setOpenPositions(res.data as OpenPosition[]);
+      else if (res.error) console.warn('[Alpha] v_open_positions:', res.error.message);
+    } catch (e) { console.warn('[Alpha] v_open_positions fetch failed', e); }
 
-    if (openRes.data) setOpenPositions(openRes.data as OpenPosition[]);
-    if (pnlExRes.data) setPnlByExchange(pnlExRes.data as PnLByExchange[]);
-    if (futRes.data) setFuturesPositions(futRes.data as FuturesPosition[]);
-    if (dailyRes.data) setDailyPnL(dailyRes.data as DailyPnL[]);
-    if (stratPerfRes.data) setStrategyPerformance(stratPerfRes.data as StrategyPerformance[]);
+    try {
+      const res = await client.from('v_pnl_by_exchange').select('*');
+      if (res.data) setPnlByExchange(res.data as PnLByExchange[]);
+      else if (res.error) console.warn('[Alpha] v_pnl_by_exchange:', res.error.message);
+    } catch (e) { console.warn('[Alpha] v_pnl_by_exchange fetch failed', e); }
+
+    try {
+      const res = await client.from('v_futures_positions').select('*');
+      if (res.data) setFuturesPositions(res.data as FuturesPosition[]);
+      else if (res.error) console.warn('[Alpha] v_futures_positions:', res.error.message);
+    } catch (e) { console.warn('[Alpha] v_futures_positions fetch failed', e); }
+
+    try {
+      const res = await client.from('v_daily_pnl_timeseries').select('*').order('trade_date', { ascending: true });
+      if (res.data) setDailyPnL(res.data as DailyPnL[]);
+      else if (res.error) console.warn('[Alpha] v_daily_pnl_timeseries:', res.error.message);
+    } catch (e) { console.warn('[Alpha] v_daily_pnl_timeseries fetch failed', e); }
+
+    try {
+      const res = await client.from('v_strategy_performance').select('*');
+      if (res.data) setStrategyPerformance(res.data as StrategyPerformance[]);
+      else if (res.error) console.warn('[Alpha] v_strategy_performance:', res.error.message);
+    } catch (e) { console.warn('[Alpha] v_strategy_performance fetch failed', e); }
   }, []);
 
   const buildInitialFeed = useCallback((trades: Trade[], logs: StrategyLog[]) => {
@@ -172,24 +190,39 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const client = getSupabase();
-    if (!client) return;
+    if (!client) {
+      console.warn('[Alpha] No Supabase client — env vars missing?');
+      return;
+    }
+
+    console.log('[Alpha] Supabase client ready, fetching data...');
 
     async function fetchInitialData() {
-      const [tradesRes, botStatusRes, strategyLogRes] = await Promise.all([
-        client!.from('trades').select('*').order('timestamp', { ascending: false }).limit(500),
-        client!.from('bot_status').select('*').order('timestamp', { ascending: false }).limit(1),
-        client!.from('strategy_log').select('*').order('timestamp', { ascending: false }).limit(100),
-      ]);
+      try {
+        const [tradesRes, botStatusRes, strategyLogRes] = await Promise.all([
+          client!.from('trades').select('*').order('timestamp', { ascending: false }).limit(500),
+          client!.from('bot_status').select('*').order('timestamp', { ascending: false }).limit(1),
+          client!.from('strategy_log').select('*').order('timestamp', { ascending: false }).limit(100),
+        ]);
 
-      const tradeData = (tradesRes.data ?? []) as Trade[];
-      const logData = (strategyLogRes.data ?? []) as StrategyLog[];
+        if (tradesRes.error) console.error('[Alpha] trades query error:', tradesRes.error.message);
+        if (botStatusRes.error) console.error('[Alpha] bot_status query error:', botStatusRes.error.message);
+        if (strategyLogRes.error) console.error('[Alpha] strategy_log query error:', strategyLogRes.error.message);
 
-      setTrades(tradeData);
-      if (botStatusRes.data && botStatusRes.data.length > 0) {
-        setBotStatus(botStatusRes.data[0] as BotStatus);
+        const tradeData = (tradesRes.data ?? []) as Trade[];
+        const logData = (strategyLogRes.data ?? []) as StrategyLog[];
+
+        console.log(`[Alpha] Fetched: ${tradeData.length} trades, ${logData.length} strategy logs, ${botStatusRes.data?.length ?? 0} bot status`);
+
+        setTrades(tradeData);
+        if (botStatusRes.data && botStatusRes.data.length > 0) {
+          setBotStatus(botStatusRes.data[0] as BotStatus);
+        }
+        setStrategyLog(logData);
+        buildInitialFeed(tradeData, logData);
+      } catch (err) {
+        console.error('[Alpha] fetchInitialData failed:', err);
       }
-      setStrategyLog(logData);
-      buildInitialFeed(tradeData, logData);
     }
 
     fetchInitialData();
