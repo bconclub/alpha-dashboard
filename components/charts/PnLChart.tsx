@@ -44,6 +44,16 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
   );
 }
 
+function getStrategyLabel(strategy: Strategy): string {
+  switch (strategy) {
+    case 'Grid': return 'Grid';
+    case 'Momentum': return 'Momentum';
+    case 'Arbitrage': return 'Arbitrage';
+    case 'futures_momentum': return 'Futures Momentum';
+    default: return strategy;
+  }
+}
+
 export function PnLChart({ trades: tradesProp, strategy }: PnLChartProps) {
   const { trades: contextTrades } = useSupabase();
   const trades = tradesProp ?? contextTrades;
@@ -74,10 +84,14 @@ export function PnLChart({ trades: tradesProp, strategy }: PnLChartProps) {
   const finalPnL = data.length > 0 ? data[data.length - 1].pnl : 0;
   const lineColor = finalPnL >= 0 ? '#10b981' : '#ef4444';
 
+  const title = strategy
+    ? `Cumulative P&L — ${getStrategyLabel(strategy)}`
+    : 'Cumulative P&L';
+
   return (
     <div className="bg-card border border-zinc-800 rounded-xl p-5">
       <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-wider mb-4">
-        Cumulative P&L
+        {title}
       </h3>
 
       {data.length === 0 ? (

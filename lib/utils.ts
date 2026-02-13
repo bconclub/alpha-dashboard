@@ -1,4 +1,5 @@
 import { format, formatDistanceToNow } from 'date-fns';
+import type { Exchange, PositionType } from './types';
 
 export function formatCurrency(value: number): string {
   return new Intl.NumberFormat('en-US', {
@@ -46,6 +47,7 @@ export function getStrategyColor(strategy: string): string {
     case 'Grid': return '#3b82f6';
     case 'Momentum': return '#f59e0b';
     case 'Arbitrage': return '#8b5cf6';
+    case 'futures_momentum': return '#f97316';
     default: return '#6b7280';
   }
 }
@@ -67,4 +69,53 @@ export function tradesToCSV(trades: Array<Record<string, unknown>>): string {
   const headers = Object.keys(trades[0]);
   const rows = trades.map(t => headers.map(h => JSON.stringify(t[h] ?? '')).join(','));
   return [headers.join(','), ...rows].join('\n');
+}
+
+// --- Exchange / Futures helpers ---
+
+export function getExchangeLabel(exchange: Exchange): string {
+  switch (exchange) {
+    case 'binance': return 'Binance';
+    case 'delta': return 'Delta';
+    default: return exchange;
+  }
+}
+
+export function getExchangeColor(exchange: Exchange): string {
+  switch (exchange) {
+    case 'binance': return '#f0b90b';
+    case 'delta': return '#00d2ff';
+    default: return '#6b7280';
+  }
+}
+
+export function getPositionTypeLabel(pt: PositionType): string {
+  switch (pt) {
+    case 'spot': return 'SPOT';
+    case 'long': return 'LONG';
+    case 'short': return 'SHORT';
+    default: return pt;
+  }
+}
+
+export function getPositionTypeColor(pt: PositionType): string {
+  switch (pt) {
+    case 'long': return 'text-emerald-400';
+    case 'short': return 'text-red-400';
+    case 'spot': return 'text-zinc-400';
+    default: return 'text-zinc-400';
+  }
+}
+
+export function getPositionTypeBadgeVariant(pt: PositionType): 'success' | 'danger' | 'default' {
+  switch (pt) {
+    case 'long': return 'success';
+    case 'short': return 'danger';
+    case 'spot': return 'default';
+    default: return 'default';
+  }
+}
+
+export function formatLeverage(leverage: number): string {
+  return leverage > 1 ? `${leverage}x` : '';
 }

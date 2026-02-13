@@ -6,14 +6,26 @@ import { StatCard } from '@/components/ui/StatCard';
 import { formatPnL, formatPercentage, formatCurrency } from '@/lib/utils';
 
 export function PnLCard() {
-  const { botStatus, trades } = useSupabase();
+  const { botStatus, trades, filteredTrades } = useSupabase();
 
   const todayPnL = useMemo(() => {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
-    return trades
+    return filteredTrades
       .filter((t) => new Date(t.timestamp) >= startOfDay)
+      .reduce((sum, t) => sum + t.pnl, 0);
+  }, [filteredTrades]);
+
+  const spotPnL = useMemo(() => {
+    return trades
+      .filter((t) => t.position_type === 'spot')
+      .reduce((sum, t) => sum + t.pnl, 0);
+  }, [trades]);
+
+  const futuresPnL = useMemo(() => {
+    return trades
+      .filter((t) => t.position_type !== 'spot')
       .reduce((sum, t) => sum + t.pnl, 0);
   }, [trades]);
 
@@ -22,7 +34,7 @@ export function PnLCard() {
   const capital = botStatus?.capital ?? 0;
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
       <StatCard
         title="Total P&L"
         value={formatPnL(totalPnL)}
@@ -42,6 +54,16 @@ export function PnLCard() {
         title="Current Capital"
         value={formatCurrency(capital)}
         changeType="neutral"
+      />
+      <StatCard
+        title="Spot P&L"
+        value={formatPnL(spotPnL)}
+        changeType={spotPnL > 0 ? 'positive' : spotPnL < 0 ? 'negative' : 'neutral'}
+      />
+      <StatCard
+        title="Futures P&L"
+        value={formatPnL(futuresPnL)}
+        changeType={futuresPnL > 0 ? 'positive' : futuresPnL < 0 ? 'negative' : 'neutral'}
       />
     </div>
   );

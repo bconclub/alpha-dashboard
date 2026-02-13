@@ -6,17 +6,41 @@ import {
   useEffect,
   useMemo,
   useState,
+  useCallback,
   type ReactNode,
 } from 'react';
 import { getSupabase } from '@/lib/supabase';
-import type { Trade, BotStatus, StrategyLog } from '@/lib/types';
+import type {
+  Trade,
+  BotStatus,
+  StrategyLog,
+  ExchangeFilter,
+  OpenPosition,
+  PnLByExchange,
+  FuturesPosition,
+  DailyPnL,
+  StrategyPerformance,
+} from '@/lib/types';
 
 interface SupabaseContextValue {
+  // Core data
   trades: Trade[];
   recentTrades: Trade[];
   botStatus: BotStatus | null;
   strategyLog: StrategyLog[];
   isConnected: boolean;
+  // Exchange filter
+  exchangeFilter: ExchangeFilter;
+  setExchangeFilter: (filter: ExchangeFilter) => void;
+  filteredTrades: Trade[];
+  // View data
+  openPositions: OpenPosition[];
+  pnlByExchange: PnLByExchange[];
+  futuresPositions: FuturesPosition[];
+  dailyPnL: DailyPnL[];
+  strategyPerformance: StrategyPerformance[];
+  // Refresh
+  refreshViews: () => void;
 }
 
 const SupabaseContext = createContext<SupabaseContextValue | null>(null);
@@ -27,6 +51,15 @@ const EMPTY_CONTEXT: SupabaseContextValue = {
   botStatus: null,
   strategyLog: [],
   isConnected: false,
+  exchangeFilter: 'all',
+  setExchangeFilter: () => {},
+  filteredTrades: [],
+  openPositions: [],
+  pnlByExchange: [],
+  futuresPositions: [],
+  dailyPnL: [],
+  strategyPerformance: [],
+  refreshViews: () => {},
 };
 
 export function SupabaseProvider({ children }: { children: ReactNode }) {
@@ -48,7 +81,36 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
   const [botStatus, setBotStatus] = useState<BotStatus | null>(null);
   const [strategyLog, setStrategyLog] = useState<StrategyLog[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilter>('all');
 
+  // View data
+  const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
+  const [pnlByExchange, setPnlByExchange] = useState<PnLByExchange[]>([]);
+  const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
+  const [dailyPnL, setDailyPnL] = useState<DailyPnL[]>([]);
+  const [strategyPerformance, setStrategyPerformance] = useState<StrategyPerformance[]>([]);
+
+  // Fetch view data from Supabase views
+  const fetchViews = useCallback(async () => {
+    const client = getSupabase();
+    if (!client) return;
+
+    const [openRes, pnlExRes, futRes, dailyRes, stratPerfRes] = await Promise.all([
+      client.from('v_open_positions').select('*'),
+      client.from('v_pnl_by_exchange').select('*'),
+      client.from('v_futures_positions').select('*'),
+      client.from('v_daily_pnl_timeseries').select('*').order('trade_date', { ascending: true }),
+      client.from('v_strategy_performance').select('*'),
+    ]);
+
+    if (openRes.data) setOpenPositions(openRes.data as OpenPosition[]);
+    if (pnlExRes.data) setPnlByExchange(pnlExRes.data as PnLByExchange[]);
+    if (futRes.data) setFuturesPositions(futRes.data as FuturesPosition[]);
+    if (dailyRes.data) setDailyPnL(dailyRes.data as DailyPnL[]);
+    if (stratPerfRes.data) setStrategyPerformance(stratPerfRes.data as StrategyPerformance[]);
+  }, []);
+
+  // Fetch initial core data
   useEffect(() => {
     const client = getSupabase();
     if (!client) return;
@@ -80,8 +142,10 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     }
 
     fetchInitialData();
-  }, []);
+    fetchViews();
+  }, [fetchViews]);
 
+  // Realtime subscriptions
   useEffect(() => {
     const client = getSupabase();
     if (!client) return;
@@ -94,6 +158,8 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
         (payload) => {
           const newTrade = payload.new as Trade;
           setTrades((prev) => [newTrade, ...prev]);
+          // Refresh views when new trade arrives
+          fetchViews();
         },
       )
       .on(
@@ -119,9 +185,15 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     return () => {
       client.removeChannel(channel);
     };
-  }, []);
+  }, [fetchViews]);
 
-  const recentTrades = useMemo(() => trades.slice(0, 10), [trades]);
+  // Derived: filtered trades based on exchange filter
+  const filteredTrades = useMemo(() => {
+    if (exchangeFilter === 'all') return trades;
+    return trades.filter((t) => t.exchange === exchangeFilter);
+  }, [trades, exchangeFilter]);
+
+  const recentTrades = useMemo(() => filteredTrades.slice(0, 10), [filteredTrades]);
 
   const value = useMemo<SupabaseContextValue>(
     () => ({
@@ -130,8 +202,22 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
       botStatus,
       strategyLog,
       isConnected,
+      exchangeFilter,
+      setExchangeFilter,
+      filteredTrades,
+      openPositions,
+      pnlByExchange,
+      futuresPositions,
+      dailyPnL,
+      strategyPerformance,
+      refreshViews: fetchViews,
     }),
-    [trades, recentTrades, botStatus, strategyLog, isConnected],
+    [
+      trades, recentTrades, botStatus, strategyLog, isConnected,
+      exchangeFilter, filteredTrades,
+      openPositions, pnlByExchange, futuresPositions, dailyPnL, strategyPerformance,
+      fetchViews,
+    ],
   );
 
   return (

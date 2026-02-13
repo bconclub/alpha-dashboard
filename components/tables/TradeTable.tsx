@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useMemo, useCallback } from 'react';
-import type { Trade, Strategy } from '@/lib/types';
+import type { Trade, Strategy, Exchange, PositionType } from '@/lib/types';
 import {
   formatCurrency,
   formatPnL,
@@ -9,6 +9,11 @@ import {
   cn,
   getPnLColor,
   tradesToCSV,
+  getExchangeLabel,
+  getExchangeColor,
+  getPositionTypeLabel,
+  getPositionTypeColor,
+  formatLeverage,
 } from '@/lib/utils';
 import { Badge } from '@/components/ui/Badge';
 
@@ -18,7 +23,7 @@ import { Badge } from '@/components/ui/Badge';
 
 type SortKey = keyof Pick<
   Trade,
-  'timestamp' | 'pair' | 'side' | 'price' | 'amount' | 'strategy' | 'pnl' | 'status'
+  'timestamp' | 'pair' | 'side' | 'price' | 'amount' | 'strategy' | 'pnl' | 'status' | 'exchange' | 'position_type' | 'leverage'
 >;
 
 type SortDirection = 'asc' | 'desc';
@@ -33,7 +38,18 @@ interface TradeTableProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-const STRATEGIES: Strategy[] = ['Grid', 'Momentum', 'Arbitrage'];
+const STRATEGIES: Strategy[] = ['Grid', 'Momentum', 'Arbitrage', 'futures_momentum'];
+const EXCHANGES: { label: string; value: Exchange | 'All' }[] = [
+  { label: 'All', value: 'All' },
+  { label: 'Binance', value: 'binance' },
+  { label: 'Delta', value: 'delta' },
+];
+const POSITION_TYPES: { label: string; value: PositionType | 'All' }[] = [
+  { label: 'All', value: 'All' },
+  { label: 'Spot', value: 'spot' },
+  { label: 'Long', value: 'long' },
+  { label: 'Short', value: 'short' },
+];
 const PNL_OPTIONS: { label: string; value: PnLFilter }[] = [
   { label: 'All', value: 'all' },
   { label: 'Profit', value: 'profit' },
@@ -44,7 +60,10 @@ const TRADES_PER_PAGE = 50;
 const COLUMNS: { key: SortKey; label: string; align?: 'right' }[] = [
   { key: 'timestamp', label: 'Date' },
   { key: 'pair', label: 'Pair' },
+  { key: 'exchange', label: 'Exchange' },
   { key: 'side', label: 'Side' },
+  { key: 'position_type', label: 'Type' },
+  { key: 'leverage', label: 'Leverage', align: 'right' },
   { key: 'price', label: 'Price', align: 'right' },
   { key: 'amount', label: 'Amount', align: 'right' },
   { key: 'strategy', label: 'Strategy' },
@@ -61,6 +80,7 @@ function getStrategyBadgeVariant(strategy: Strategy) {
     Grid: 'blue',
     Momentum: 'warning',
     Arbitrage: 'purple',
+    futures_momentum: 'warning',
   };
   return map[strategy];
 }
@@ -102,6 +122,8 @@ function compareTrades(a: Trade, b: Trade, key: SortKey, dir: SortDirection): nu
 export default function TradeTable({ trades }: TradeTableProps) {
   // -- Filter state ---------------------------------------------------------
   const [strategyFilter, setStrategyFilter] = useState<Strategy | 'All'>('All');
+  const [exchangeFilterLocal, setExchangeFilterLocal] = useState<Exchange | 'All'>('All');
+  const [positionTypeFilter, setPositionTypeFilter] = useState<PositionType | 'All'>('All');
   const [pnlFilter, setPnlFilter] = useState<PnLFilter>('all');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -121,6 +143,16 @@ export default function TradeTable({ trades }: TradeTableProps) {
     // Strategy filter
     if (strategyFilter !== 'All') {
       result = result.filter((t) => t.strategy === strategyFilter);
+    }
+
+    // Exchange filter
+    if (exchangeFilterLocal !== 'All') {
+      result = result.filter((t) => t.exchange === exchangeFilterLocal);
+    }
+
+    // Position type filter
+    if (positionTypeFilter !== 'All') {
+      result = result.filter((t) => t.position_type === positionTypeFilter);
     }
 
     // P&L filter
@@ -151,7 +183,7 @@ export default function TradeTable({ trades }: TradeTableProps) {
     result = [...result].sort((a, b) => compareTrades(a, b, sortKey, sortDir));
 
     return result;
-  }, [trades, strategyFilter, pnlFilter, dateFrom, dateTo, search, sortKey, sortDir]);
+  }, [trades, strategyFilter, exchangeFilterLocal, positionTypeFilter, pnlFilter, dateFrom, dateTo, search, sortKey, sortDir]);
 
   // -- Derived: pagination --------------------------------------------------
   const totalPages = Math.max(1, Math.ceil(filteredTrades.length / TRADES_PER_PAGE));
@@ -179,6 +211,16 @@ export default function TradeTable({ trades }: TradeTableProps) {
 
   const handleStrategyFilter = useCallback((value: Strategy | 'All') => {
     setStrategyFilter(value);
+    setPage(1);
+  }, []);
+
+  const handleExchangeFilter = useCallback((value: Exchange | 'All') => {
+    setExchangeFilterLocal(value);
+    setPage(1);
+  }, []);
+
+  const handlePositionTypeFilter = useCallback((value: PositionType | 'All') => {
+    setPositionTypeFilter(value);
     setPage(1);
   }, []);
 
@@ -245,6 +287,44 @@ export default function TradeTable({ trades }: TradeTableProps) {
                   )}
                 >
                   {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Exchange filter */}
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-zinc-400">Exchange</span>
+            <div className="flex gap-1">
+              {EXCHANGES.map((ex) => (
+                <button
+                  key={ex.value}
+                  onClick={() => handleExchangeFilter(ex.value)}
+                  className={cn(
+                    filterBtnBase,
+                    exchangeFilterLocal === ex.value ? filterBtnActive : filterBtnInactive,
+                  )}
+                >
+                  {ex.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Position Type filter */}
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-zinc-400">Position</span>
+            <div className="flex gap-1">
+              {POSITION_TYPES.map((pt) => (
+                <button
+                  key={pt.value}
+                  onClick={() => handlePositionTypeFilter(pt.value)}
+                  className={cn(
+                    filterBtnBase,
+                    positionTypeFilter === pt.value ? filterBtnActive : filterBtnInactive,
+                  )}
+                >
+                  {pt.label}
                 </button>
               ))}
             </div>
@@ -325,7 +405,7 @@ export default function TradeTable({ trades }: TradeTableProps) {
       {/* ----------------------------------------------------------------- */}
       <div className="bg-card overflow-hidden rounded-xl border border-zinc-800">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[900px] text-sm">
+          <table className="w-full min-w-[1200px] text-sm">
             {/* Header */}
             <thead>
               <tr className="bg-zinc-900/50">
@@ -378,11 +458,42 @@ export default function TradeTable({ trades }: TradeTableProps) {
                       {trade.pair}
                     </td>
 
+                    {/* Exchange */}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className="inline-flex items-center gap-1.5">
+                        <span
+                          className="inline-block h-2 w-2 rounded-full"
+                          style={{ backgroundColor: getExchangeColor(trade.exchange) }}
+                        />
+                        <span className="text-zinc-300 text-xs">
+                          {getExchangeLabel(trade.exchange)}
+                        </span>
+                      </span>
+                    </td>
+
                     {/* Side */}
                     <td className="whitespace-nowrap px-4 py-3">
                       <Badge variant={trade.side === 'buy' ? 'success' : 'danger'}>
                         {trade.side.toUpperCase()}
                       </Badge>
+                    </td>
+
+                    {/* Type (position_type) */}
+                    <td className="whitespace-nowrap px-4 py-3">
+                      <span className={cn('text-xs font-medium', getPositionTypeColor(trade.position_type))}>
+                        {getPositionTypeLabel(trade.position_type)}
+                      </span>
+                    </td>
+
+                    {/* Leverage */}
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      {trade.leverage > 1 ? (
+                        <span className="text-xs font-medium text-amber-400">
+                          {formatLeverage(trade.leverage)}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-zinc-500">&mdash;</span>
+                      )}
                     </td>
 
                     {/* Price */}
