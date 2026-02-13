@@ -1,56 +1,36 @@
 'use client';
 
-import { PnLCard } from '@/components/dashboard/PnLCard';
-import { DailyPnLChart } from '@/components/charts/DailyPnLChart';
-import { RecentTrades } from '@/components/dashboard/RecentTrades';
-import { ActiveStrategy } from '@/components/dashboard/ActiveStrategy';
-import { StrategyBreakdown } from '@/components/dashboard/StrategyBreakdown';
-import { CapitalTracker } from '@/components/dashboard/CapitalTracker';
-import { BotStatusIndicator } from '@/components/dashboard/BotStatus';
-import { ExchangeToggle } from '@/components/dashboard/ExchangeToggle';
-import { ExchangeComparison } from '@/components/dashboard/ExchangeComparison';
+import { LiveStatusBar } from '@/components/dashboard/LiveStatusBar';
+import { MarketOverview } from '@/components/dashboard/MarketOverview';
+import { TriggerProximity } from '@/components/dashboard/TriggerProximity';
+import { LiveActivityFeed } from '@/components/dashboard/LiveActivityFeed';
 import { OpenPositions } from '@/components/dashboard/OpenPositions';
-import { FuturesPositions } from '@/components/dashboard/FuturesPositions';
+import { PerformancePanel } from '@/components/dashboard/PerformancePanel';
 
 export default function DashboardPage() {
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <h1 className="text-2xl font-bold tracking-tight text-white">
-            Dashboard
-          </h1>
-          <ExchangeToggle />
+    <div className="space-y-4">
+      {/* 1. Live Status Bar — full width */}
+      <LiveStatusBar />
+
+      {/* 2 & 3. Market Overview (60%) + Trigger Proximity (40%) */}
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+        <div className="lg:col-span-3">
+          <MarketOverview />
         </div>
-        <BotStatusIndicator />
-      </div>
-
-      {/* P&L Stat Cards */}
-      <PnLCard />
-
-      {/* Exchange Comparison */}
-      <ExchangeComparison />
-
-      {/* Main content grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left column — charts & recent trades */}
-        <div className="lg:col-span-2 space-y-6">
-          <DailyPnLChart />
-          <OpenPositions />
-          <RecentTrades />
-        </div>
-
-        {/* Right column — strategy info */}
-        <div className="space-y-6">
-          <ActiveStrategy />
-          <StrategyBreakdown />
-          <CapitalTracker />
+        <div className="lg:col-span-2">
+          <TriggerProximity />
         </div>
       </div>
 
-      {/* Futures Positions — full width */}
-      <FuturesPositions />
+      {/* 4. Live Activity Feed — full width */}
+      <LiveActivityFeed />
+
+      {/* 5. Open Positions — right side concept, but full width on single page */}
+      <OpenPositions />
+
+      {/* 6. Performance — full width, collapsible */}
+      <PerformancePanel />
     </div>
   );
 }

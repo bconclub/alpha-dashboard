@@ -15,14 +15,32 @@ export interface Trade {
   exchange: Exchange;
   leverage: number;
   position_type: PositionType;
+  stop_loss?: number;
+  take_profit?: number;
 }
 
 export interface StrategyLog {
   id: string;
   timestamp: string;
+  pair: string;
   market_condition: string;
   strategy_selected: Strategy;
   reason: string;
+  exchange: Exchange;
+  adx?: number;
+  rsi?: number;
+  signal_strength?: number;
+  macd_value?: number;
+  macd_signal?: number;
+  macd_histogram?: number;
+  bb_upper?: number;
+  bb_lower?: number;
+  bb_middle?: number;
+  atr?: number;
+  volume_ratio?: number;
+  entry_distance_pct?: number;
+  current_price?: number;
+  price_change_15m?: number;
 }
 
 export interface BotStatus {
@@ -32,6 +50,16 @@ export interface BotStatus {
   win_rate: number;
   active_strategy: Strategy;
   capital: number;
+  binance_balance?: number;
+  delta_balance?: number;
+  delta_balance_inr?: number;
+  binance_connected?: boolean;
+  delta_connected?: boolean;
+  bot_state?: 'running' | 'paused';
+  uptime_seconds?: number;
+  shorting_enabled?: boolean;
+  leverage_level?: number;
+  active_strategies_count?: number;
 }
 
 export interface BotCommand {
@@ -53,8 +81,6 @@ export interface StrategyStats {
   last_active: string;
 }
 
-// --- Supabase View Types ---
-
 export interface OpenPosition {
   id: string;
   timestamp: string;
@@ -68,6 +94,9 @@ export interface OpenPosition {
   leverage: number;
   position_type: PositionType;
   effective_exposure: number;
+  stop_loss?: number;
+  take_profit?: number;
+  current_price?: number;
 }
 
 export interface PnLByExchange {
@@ -127,3 +156,16 @@ export interface PnLByPair {
 }
 
 export type ExchangeFilter = 'all' | 'binance' | 'delta';
+
+export type ActivityEventType = 'analysis' | 'strategy_switch' | 'trade_open' | 'trade_close' | 'short_open' | 'risk_alert';
+
+export interface ActivityEvent {
+  id: string;
+  timestamp: string;
+  pair: string;
+  eventType: ActivityEventType;
+  description: string;
+  exchange?: Exchange;
+}
+
+export type ActivityFilter = 'all' | 'trades' | 'alerts';

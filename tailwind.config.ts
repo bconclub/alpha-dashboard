@@ -18,10 +18,16 @@ const config: Config = {
           400: "#533483",
           500: "#e94560",
         },
-        profit: "#10b981",
-        loss: "#ef4444",
+        profit: "#00c853",
+        loss: "#ff1744",
         card: "#111827",
         surface: "#1f2937",
+        accent: {
+          green: "#00c853",
+          red: "#ff1744",
+          yellow: "#ffd600",
+          blue: "#2196f3",
+        },
       },
       fontFamily: {
         mono: ["JetBrains Mono", "Fira Code", "monospace"],

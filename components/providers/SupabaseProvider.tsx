@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
   useCallback,
+  useRef,
   type ReactNode,
 } from 'react';
 import { getSupabase } from '@/lib/supabase';
@@ -20,26 +21,25 @@ import type {
   FuturesPosition,
   DailyPnL,
   StrategyPerformance,
+  ActivityEvent,
+  ActivityEventType,
 } from '@/lib/types';
 
 interface SupabaseContextValue {
-  // Core data
   trades: Trade[];
   recentTrades: Trade[];
   botStatus: BotStatus | null;
   strategyLog: StrategyLog[];
   isConnected: boolean;
-  // Exchange filter
   exchangeFilter: ExchangeFilter;
   setExchangeFilter: (filter: ExchangeFilter) => void;
   filteredTrades: Trade[];
-  // View data
   openPositions: OpenPosition[];
   pnlByExchange: PnLByExchange[];
   futuresPositions: FuturesPosition[];
   dailyPnL: DailyPnL[];
   strategyPerformance: StrategyPerformance[];
-  // Refresh
+  activityFeed: ActivityEvent[];
   refreshViews: () => void;
 }
 
@@ -59,8 +59,24 @@ const EMPTY_CONTEXT: SupabaseContextValue = {
   futuresPositions: [],
   dailyPnL: [],
   strategyPerformance: [],
+  activityFeed: [],
   refreshViews: () => {},
 };
+
+function buildActivityEvent(
+  type: ActivityEventType,
+  source: Trade | StrategyLog,
+  description: string,
+): ActivityEvent {
+  return {
+    id: source.id,
+    timestamp: source.timestamp,
+    pair: 'pair' in source ? source.pair : '',
+    eventType: type,
+    description,
+    exchange: 'exchange' in source ? source.exchange : undefined,
+  };
+}
 
 export function SupabaseProvider({ children }: { children: ReactNode }) {
   const client = getSupabase();
@@ -82,15 +98,21 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
   const [strategyLog, setStrategyLog] = useState<StrategyLog[]>([]);
   const [isConnected, setIsConnected] = useState(false);
   const [exchangeFilter, setExchangeFilter] = useState<ExchangeFilter>('all');
+  const [activityFeed, setActivityFeed] = useState<ActivityEvent[]>([]);
 
-  // View data
   const [openPositions, setOpenPositions] = useState<OpenPosition[]>([]);
   const [pnlByExchange, setPnlByExchange] = useState<PnLByExchange[]>([]);
   const [futuresPositions, setFuturesPositions] = useState<FuturesPosition[]>([]);
   const [dailyPnL, setDailyPnL] = useState<DailyPnL[]>([]);
   const [strategyPerformance, setStrategyPerformance] = useState<StrategyPerformance[]>([]);
 
-  // Fetch view data from Supabase views
+  const activityRef = useRef<ActivityEvent[]>([]);
+
+  const pushActivity = useCallback((event: ActivityEvent) => {
+    activityRef.current = [event, ...activityRef.current].slice(0, 50);
+    setActivityFeed([...activityRef.current]);
+  }, []);
+
   const fetchViews = useCallback(async () => {
     const client = getSupabase();
     if (!client) return;
@@ -110,74 +132,118 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     if (stratPerfRes.data) setStrategyPerformance(stratPerfRes.data as StrategyPerformance[]);
   }, []);
 
-  // Fetch initial core data
+  const buildInitialFeed = useCallback((trades: Trade[], logs: StrategyLog[]) => {
+    const events: ActivityEvent[] = [];
+
+    for (const trade of trades.slice(0, 30)) {
+      if (trade.status === 'open') {
+        const isFuturesShort = trade.position_type === 'short';
+        const type: ActivityEventType = isFuturesShort ? 'short_open' : 'trade_open';
+        const label = isFuturesShort
+          ? `SHORT ${trade.pair} @ $${trade.price.toLocaleString()}`
+          : `LONG ${trade.pair} @ $${trade.price.toLocaleString()}`;
+        events.push(buildActivityEvent(type, trade, label));
+      } else if (trade.status === 'closed') {
+        const pctLabel = trade.pnl >= 0 ? `+${trade.pnl.toFixed(2)}%` : `${trade.pnl.toFixed(2)}%`;
+        events.push(
+          buildActivityEvent('trade_close', trade, `${trade.pair} closed — ${pctLabel} P&L`),
+        );
+      }
+    }
+
+    for (const log of logs.slice(0, 20)) {
+      events.push(
+        buildActivityEvent(
+          'analysis',
+          log,
+          `${log.pair ?? 'Market'} analyzed — ${log.market_condition}, strategy: ${log.strategy_selected}`,
+        ),
+      );
+    }
+
+    events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+    activityRef.current = events.slice(0, 50);
+    setActivityFeed([...activityRef.current]);
+  }, []);
+
   useEffect(() => {
     const client = getSupabase();
     if (!client) return;
 
     async function fetchInitialData() {
       const [tradesRes, botStatusRes, strategyLogRes] = await Promise.all([
-        client!
-          .from('trades')
-          .select('*')
-          .order('timestamp', { ascending: false })
-          .limit(500),
-        client!
-          .from('bot_status')
-          .select('*')
-          .order('timestamp', { ascending: false })
-          .limit(1),
-        client!
-          .from('strategy_log')
-          .select('*')
-          .order('timestamp', { ascending: false })
-          .limit(100),
+        client!.from('trades').select('*').order('timestamp', { ascending: false }).limit(500),
+        client!.from('bot_status').select('*').order('timestamp', { ascending: false }).limit(1),
+        client!.from('strategy_log').select('*').order('timestamp', { ascending: false }).limit(100),
       ]);
 
-      if (tradesRes.data) setTrades(tradesRes.data as Trade[]);
+      const tradeData = (tradesRes.data ?? []) as Trade[];
+      const logData = (strategyLogRes.data ?? []) as StrategyLog[];
+
+      setTrades(tradeData);
       if (botStatusRes.data && botStatusRes.data.length > 0) {
         setBotStatus(botStatusRes.data[0] as BotStatus);
       }
-      if (strategyLogRes.data) setStrategyLog(strategyLogRes.data as StrategyLog[]);
+      setStrategyLog(logData);
+      buildInitialFeed(tradeData, logData);
     }
 
     fetchInitialData();
     fetchViews();
-  }, [fetchViews]);
+  }, [fetchViews, buildInitialFeed]);
 
-  // Realtime subscriptions
   useEffect(() => {
     const client = getSupabase();
     if (!client) return;
 
     const channel = client
       .channel('alpha-dashboard')
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'trades' },
-        (payload) => {
-          const newTrade = payload.new as Trade;
-          setTrades((prev) => [newTrade, ...prev]);
-          // Refresh views when new trade arrives
-          fetchViews();
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'bot_status' },
-        (payload) => {
-          const newStatus = payload.new as BotStatus;
-          setBotStatus(newStatus);
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'public', table: 'strategy_log' },
-        (payload) => {
-          const newLog = payload.new as StrategyLog;
-          setStrategyLog((prev) => [newLog, ...prev]);
-        },
-      )
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trades' }, (payload) => {
+        const t = payload.new as Trade;
+        setTrades((prev) => [t, ...prev]);
+        fetchViews();
+
+        if (t.status === 'open') {
+          const isFuturesShort = t.position_type === 'short';
+          pushActivity(
+            buildActivityEvent(
+              isFuturesShort ? 'short_open' : 'trade_open',
+              t,
+              isFuturesShort
+                ? `SHORT ${t.pair} @ $${t.price.toLocaleString()} on ${t.exchange}`
+                : `LONG ${t.pair} @ $${t.price.toLocaleString()} — RSI signal`,
+            ),
+          );
+        } else if (t.status === 'closed') {
+          const pctLabel = t.pnl >= 0 ? `+${t.pnl.toFixed(2)}%` : `${t.pnl.toFixed(2)}%`;
+          pushActivity(buildActivityEvent('trade_close', t, `${t.pair} ${pctLabel} profit closed`));
+        }
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trades' }, (payload) => {
+        const updated = payload.new as Trade;
+        setTrades((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+        fetchViews();
+
+        if (updated.status === 'closed') {
+          const pctLabel = updated.pnl >= 0 ? `+${updated.pnl.toFixed(2)}%` : `${updated.pnl.toFixed(2)}%`;
+          pushActivity(buildActivityEvent('trade_close', updated, `${updated.pair} ${pctLabel} closed`));
+        }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_status' }, (payload) => {
+        setBotStatus(payload.new as BotStatus);
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'strategy_log' }, (payload) => {
+        const log = payload.new as StrategyLog;
+        setStrategyLog((prev) => [log, ...prev]);
+
+        pushActivity(
+          buildActivityEvent(
+            'analysis',
+            log,
+            `${log.pair ?? 'Market'} — ${log.market_condition}, ${log.strategy_selected}${log.adx ? `, ADX=${log.adx.toFixed(0)}` : ''}${log.rsi ? `, RSI=${log.rsi.toFixed(0)}` : ''}`,
+          ),
+        );
+      })
       .subscribe((status) => {
         setIsConnected(status === 'SUBSCRIBED');
       });
@@ -185,9 +251,8 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     return () => {
       client.removeChannel(channel);
     };
-  }, [fetchViews]);
+  }, [fetchViews, pushActivity]);
 
-  // Derived: filtered trades based on exchange filter
   const filteredTrades = useMemo(() => {
     if (exchangeFilter === 'all') return trades;
     return trades.filter((t) => t.exchange === exchangeFilter);
@@ -210,13 +275,14 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
       futuresPositions,
       dailyPnL,
       strategyPerformance,
+      activityFeed,
       refreshViews: fetchViews,
     }),
     [
       trades, recentTrades, botStatus, strategyLog, isConnected,
       exchangeFilter, filteredTrades,
       openPositions, pnlByExchange, futuresPositions, dailyPnL, strategyPerformance,
-      fetchViews,
+      activityFeed, fetchViews,
     ],
   );
 
