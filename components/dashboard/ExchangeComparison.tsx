@@ -65,7 +65,7 @@ export function ExchangeComparison() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-zinc-500">Win Rate</span>
                   <span className="text-sm font-medium text-zinc-200">
-                    {formatPercentage(ex.win_rate)}
+                    {formatPercentage(ex.win_rate_pct)}
                   </span>
                 </div>
 

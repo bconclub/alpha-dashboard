@@ -83,11 +83,13 @@ export function OpenPositions() {
       ) : (
         <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
           {openPositions.map((pos) => {
-            const currentPrice = pos.current_price ?? pos.price;
-            const pnlPct = pos.price > 0 ? ((currentPrice - pos.price) / pos.price) * 100 : 0;
+            const entryPrice = pos.entry_price;
+            const currentPrice = pos.current_price ?? entryPrice;
+            const pnlPct = entryPrice > 0 ? ((currentPrice - entryPrice) / entryPrice) * 100 : 0;
             const adjustedPnlPct = pos.position_type === 'short' ? -pnlPct : pnlPct;
             const isProfit = adjustedPnlPct >= 0;
             const leverageStr = formatLeverage(pos.leverage);
+            const positionPnl = pos.pnl ?? (currentPrice - entryPrice) * pos.amount * (pos.position_type === 'short' ? -1 : 1);
 
             // TP/SL distances
             const tpDistance = pos.take_profit
@@ -125,7 +127,7 @@ export function OpenPositions() {
                 <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs mb-2">
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Entry</span>
-                    <span className="font-mono text-zinc-300">${formatNumber(pos.price)}</span>
+                    <span className="font-mono text-zinc-300">${formatNumber(entryPrice)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Current</span>
@@ -134,12 +136,12 @@ export function OpenPositions() {
                   <div className="flex justify-between">
                     <span className="text-zinc-500">P&L</span>
                     <span className={cn('font-mono font-medium', isProfit ? 'text-[#00c853]' : 'text-[#ff1744]')}>
-                      {isProfit ? '+' : ''}{formatCurrency(pos.pnl)} ({formatPercentage(adjustedPnlPct)})
+                      {isProfit ? '+' : ''}{formatCurrency(positionPnl)} ({formatPercentage(adjustedPnlPct)})
                     </span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Duration</span>
-                    <span className="font-mono text-zinc-400">{durationSince(pos.timestamp)}</span>
+                    <span className="font-mono text-zinc-400">{durationSince(pos.opened_at)}</span>
                   </div>
                   {pos.take_profit != null && (
                     <div className="flex justify-between">
@@ -163,10 +165,10 @@ export function OpenPositions() {
 
                 {/* Progress bar */}
                 <PositionProgressBar
-                  entry={pos.price}
+                  entry={entryPrice}
                   current={currentPrice}
-                  sl={pos.stop_loss}
-                  tp={pos.take_profit}
+                  sl={pos.stop_loss ?? undefined}
+                  tp={pos.take_profit ?? undefined}
                 />
               </div>
             );

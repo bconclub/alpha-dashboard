@@ -25,6 +25,58 @@ import type {
   ActivityEventType,
 } from '@/lib/types';
 
+// ---------------------------------------------------------------------------
+// Normalize raw DB rows → app types (maps column name differences)
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeBotStatus(raw: any): BotStatus {
+  return {
+    ...raw,
+    timestamp: raw.created_at ?? raw.timestamp ?? '',
+    // Normalize leverage field (DB uses 'leverage', some code expects 'leverage_level')
+    leverage: raw.leverage ?? raw.leverage_level ?? 1,
+    leverage_level: raw.leverage_level ?? raw.leverage ?? 1,
+    // Normalize strategy count
+    active_strategies_count: raw.active_strategy_count ?? raw.active_strategies_count ?? 0,
+    active_strategy_count: raw.active_strategy_count ?? raw.active_strategies_count ?? 0,
+  } as BotStatus;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeStrategyLog(raw: any): StrategyLog {
+  return {
+    ...raw,
+    timestamp: raw.created_at ?? raw.timestamp ?? '',
+  } as StrategyLog;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeTrade(raw: any): Trade {
+  return {
+    id: String(raw.id),
+    timestamp: raw.opened_at ?? raw.timestamp ?? raw.created_at ?? '',
+    pair: raw.pair ?? '',
+    side: raw.side ?? 'buy',
+    price: raw.entry_price ?? raw.price ?? 0,
+    exit_price: raw.exit_price ?? null,
+    amount: raw.amount ?? 0,
+    cost: raw.cost ?? undefined,
+    strategy: raw.strategy ?? '',
+    pnl: raw.pnl ?? 0,
+    pnl_pct: raw.pnl_pct ?? 0,
+    status: raw.status ?? 'open',
+    exchange: raw.exchange ?? 'binance',
+    leverage: raw.leverage ?? 1,
+    position_type: raw.position_type ?? 'spot',
+    stop_loss: raw.stop_loss ?? null,
+    take_profit: raw.take_profit ?? null,
+    order_type: raw.order_type,
+    reason: raw.reason,
+    order_id: raw.order_id,
+  };
+}
+
 interface SupabaseContextValue {
   trades: Trade[];
   recentTrades: Trade[];
@@ -69,7 +121,7 @@ function buildActivityEvent(
   description: string,
 ): ActivityEvent {
   return {
-    id: source.id,
+    id: String(source.id),
     timestamp: source.timestamp,
     pair: 'pair' in source ? source.pair : '',
     eventType: type,
@@ -118,7 +170,6 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     const client = getSupabase();
     if (!client) return;
 
-    // Fetch each view independently — some may not exist yet
     try {
       const res = await client.from('v_open_positions').select('*');
       if (res.data) setOpenPositions(res.data as OpenPosition[]);
@@ -153,7 +204,6 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
   const buildInitialFeed = useCallback((trades: Trade[], logs: StrategyLog[]) => {
     const events: ActivityEvent[] = [];
 
-    // Trades always have pair and exchange — reliable source
     for (const trade of trades.slice(0, 40)) {
       const exchangeLabel = trade.exchange === 'delta' ? ' on Delta' : '';
       if (trade.status === 'open') {
@@ -171,7 +221,6 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
       }
     }
 
-    // Strategy logs — include all, use pair if available
     for (const log of logs.slice(0, 20)) {
       const pairLabel = log.pair || 'Market';
       events.push(
@@ -188,6 +237,7 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     setActivityFeed([...activityRef.current]);
   }, []);
 
+  // ---------- Fetch initial data ----------
   useEffect(() => {
     const client = getSupabase();
     if (!client) {
@@ -200,23 +250,27 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     async function fetchInitialData() {
       try {
         const [tradesRes, botStatusRes, strategyLogRes] = await Promise.all([
-          client!.from('trades').select('*').order('timestamp', { ascending: false }).limit(500),
-          client!.from('bot_status').select('*').order('timestamp', { ascending: false }).limit(1),
-          client!.from('strategy_log').select('*').order('timestamp', { ascending: false }).limit(100),
+          // trades table uses opened_at, not timestamp
+          client!.from('trades').select('*').order('opened_at', { ascending: false }).limit(500),
+          // bot_status uses created_at
+          client!.from('bot_status').select('*').order('created_at', { ascending: false }).limit(1),
+          // strategy_log uses created_at
+          client!.from('strategy_log').select('*').order('created_at', { ascending: false }).limit(100),
         ]);
 
         if (tradesRes.error) console.error('[Alpha] trades query error:', tradesRes.error.message);
         if (botStatusRes.error) console.error('[Alpha] bot_status query error:', botStatusRes.error.message);
         if (strategyLogRes.error) console.error('[Alpha] strategy_log query error:', strategyLogRes.error.message);
 
-        const tradeData = (tradesRes.data ?? []) as Trade[];
-        const logData = (strategyLogRes.data ?? []) as StrategyLog[];
+        // Normalize all data (map DB column names → app types)
+        const tradeData = (tradesRes.data ?? []).map(normalizeTrade);
+        const logData = (strategyLogRes.data ?? []).map(normalizeStrategyLog);
 
         console.log(`[Alpha] Fetched: ${tradeData.length} trades, ${logData.length} strategy logs, ${botStatusRes.data?.length ?? 0} bot status`);
 
         setTrades(tradeData);
         if (botStatusRes.data && botStatusRes.data.length > 0) {
-          setBotStatus(botStatusRes.data[0] as BotStatus);
+          setBotStatus(normalizeBotStatus(botStatusRes.data[0]));
         }
         setStrategyLog(logData);
         buildInitialFeed(tradeData, logData);
@@ -229,6 +283,7 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     fetchViews();
   }, [fetchViews, buildInitialFeed]);
 
+  // ---------- Realtime subscriptions ----------
   useEffect(() => {
     const client = getSupabase();
     if (!client) return;
@@ -236,7 +291,7 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
     const channel = client
       .channel('alpha-dashboard')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'trades' }, (payload) => {
-        const t = payload.new as Trade;
+        const t = normalizeTrade(payload.new);
         setTrades((prev) => [t, ...prev]);
         fetchViews();
 
@@ -248,7 +303,7 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
               t,
               isFuturesShort
                 ? `SHORT ${t.pair} @ $${t.price.toLocaleString()} on ${t.exchange}`
-                : `LONG ${t.pair} @ $${t.price.toLocaleString()} — RSI signal`,
+                : `${t.side.toUpperCase()} ${t.pair} @ $${t.price.toLocaleString()} — ${t.strategy}`,
             ),
           );
         } else if (t.status === 'closed') {
@@ -257,7 +312,7 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
         }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'trades' }, (payload) => {
-        const updated = payload.new as Trade;
+        const updated = normalizeTrade(payload.new);
         setTrades((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
         fetchViews();
 
@@ -267,10 +322,13 @@ function SupabaseProviderInner({ children }: { children: ReactNode }) {
         }
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'bot_status' }, (payload) => {
-        setBotStatus(payload.new as BotStatus);
+        setBotStatus(normalizeBotStatus(payload.new));
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'bot_status' }, (payload) => {
+        setBotStatus(normalizeBotStatus(payload.new));
       })
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'strategy_log' }, (payload) => {
-        const log = payload.new as StrategyLog;
+        const log = normalizeStrategyLog(payload.new);
         setStrategyLog((prev) => [log, ...prev]);
 
         pushActivity(

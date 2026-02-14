@@ -42,13 +42,40 @@ export function cn(...classes: (string | boolean | undefined | null)[]): string 
   return classes.filter(Boolean).join(' ');
 }
 
+export function normalizeStrategy(strategy: string): string {
+  return strategy.toLowerCase();
+}
+
+export function getStrategyLabel(strategy: string): string {
+  switch (normalizeStrategy(strategy)) {
+    case 'grid': return 'Grid';
+    case 'momentum': return 'Momentum';
+    case 'arbitrage': return 'Arbitrage';
+    case 'futures_momentum': return 'Futures Momentum';
+    case 'scalp': return 'Scalp';
+    default: return strategy;
+  }
+}
+
 export function getStrategyColor(strategy: string): string {
-  switch (strategy) {
-    case 'Grid': return '#3b82f6';
-    case 'Momentum': return '#f59e0b';
-    case 'Arbitrage': return '#8b5cf6';
+  switch (normalizeStrategy(strategy)) {
+    case 'grid': return '#3b82f6';
+    case 'momentum': return '#f59e0b';
+    case 'arbitrage': return '#8b5cf6';
     case 'futures_momentum': return '#f97316';
+    case 'scalp': return '#00bcd4';
     default: return '#6b7280';
+  }
+}
+
+export function getStrategyBadgeVariant(strategy: string): 'blue' | 'warning' | 'purple' | 'default' {
+  switch (normalizeStrategy(strategy)) {
+    case 'grid': return 'blue';
+    case 'momentum': return 'warning';
+    case 'arbitrage': return 'purple';
+    case 'futures_momentum': return 'warning';
+    case 'scalp': return 'blue';
+    default: return 'default';
   }
 }
 

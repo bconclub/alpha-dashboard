@@ -14,6 +14,8 @@ import {
   getPositionTypeLabel,
   getPositionTypeColor,
   formatLeverage,
+  getStrategyLabel,
+  getStrategyBadgeVariant,
 } from '@/lib/utils';
 import { Badge } from '@/components/ui/Badge';
 
@@ -38,7 +40,7 @@ interface TradeTableProps {
 // Constants
 // ---------------------------------------------------------------------------
 
-const STRATEGIES: Strategy[] = ['Grid', 'Momentum', 'Arbitrage', 'futures_momentum'];
+const STRATEGIES: Strategy[] = ['momentum', 'futures_momentum', 'grid', 'scalp'];
 const EXCHANGES: { label: string; value: Exchange | 'All' }[] = [
   { label: 'All', value: 'All' },
   { label: 'Binance', value: 'binance' },
@@ -75,15 +77,7 @@ const COLUMNS: { key: SortKey; label: string; align?: 'right' }[] = [
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getStrategyBadgeVariant(strategy: Strategy) {
-  const map: Record<Strategy, 'blue' | 'warning' | 'purple'> = {
-    Grid: 'blue',
-    Momentum: 'warning',
-    Arbitrage: 'purple',
-    futures_momentum: 'warning',
-  };
-  return map[strategy];
-}
+// getStrategyBadgeVariant is now imported from @/lib/utils
 
 function getStatusBadgeVariant(status: Trade['status']) {
   const map: Record<Trade['status'], 'success' | 'danger' | 'default'> = {
@@ -286,7 +280,7 @@ export default function TradeTable({ trades }: TradeTableProps) {
                     strategyFilter === s ? filterBtnActive : filterBtnInactive,
                   )}
                 >
-                  {s}
+                  {s === 'All' ? 'All' : getStrategyLabel(s)}
                 </button>
               ))}
             </div>
@@ -512,7 +506,7 @@ export default function TradeTable({ trades }: TradeTableProps) {
                     {/* Strategy */}
                     <td className="whitespace-nowrap px-4 py-3">
                       <Badge variant={getStrategyBadgeVariant(trade.strategy)}>
-                        {trade.strategy}
+                        {getStrategyLabel(trade.strategy)}
                       </Badge>
                     </td>
 

@@ -11,13 +11,21 @@ function formatUptime(seconds: number): string {
   return `${m}m`;
 }
 
-function UTCClock() {
+function ISTClock() {
   const [time, setTime] = useState('');
 
   useEffect(() => {
     const tick = () => {
       const now = new Date();
-      setTime(now.toISOString().slice(11, 19) + ' UTC');
+      // Format time in IST (UTC+5:30) using Intl
+      const istStr = now.toLocaleTimeString('en-GB', {
+        timeZone: 'Asia/Kolkata',
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      });
+      setTime(istStr + ' IST');
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -207,7 +215,7 @@ export function LiveStatusBar() {
             </div>
           </div>
           <div className="border-l border-zinc-800 pl-4">
-            <UTCClock />
+            <ISTClock />
           </div>
         </div>
       </div>

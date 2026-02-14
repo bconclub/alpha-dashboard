@@ -1,26 +1,36 @@
 export type Exchange = 'binance' | 'delta';
 export type PositionType = 'spot' | 'long' | 'short';
-export type Strategy = 'Grid' | 'Momentum' | 'Arbitrage' | 'futures_momentum';
+
+// Strategy values as stored in the database (lowercase)
+export type Strategy = string;
 
 export interface Trade {
   id: string;
-  timestamp: string;
+  timestamp: string;        // normalized from opened_at
   pair: string;
   side: 'buy' | 'sell';
-  price: number;
+  price: number;            // normalized from entry_price
+  exit_price?: number | null;
   amount: number;
+  cost?: number;
   strategy: Strategy;
   pnl: number;
+  pnl_pct?: number;
   status: 'open' | 'closed' | 'cancelled';
   exchange: Exchange;
   leverage: number;
   position_type: PositionType;
-  stop_loss?: number;
-  take_profit?: number;
+  stop_loss?: number | null;
+  take_profit?: number | null;
+  order_type?: string;
+  reason?: string;
+  order_id?: string;
 }
 
 export interface StrategyLog {
   id: string;
+  created_at?: string;
+  // Normalized: we map created_at → timestamp for display
   timestamp: string;
   pair: string;
   market_condition: string;
@@ -36,30 +46,46 @@ export interface StrategyLog {
   bb_upper?: number;
   bb_lower?: number;
   bb_middle?: number;
+  bb_width?: number;
   atr?: number;
   volume_ratio?: number;
   entry_distance_pct?: number;
   current_price?: number;
   price_change_15m?: number;
+  plus_di?: number;
+  minus_di?: number;
 }
 
 export interface BotStatus {
   id: string;
+  created_at: string;
+  // Normalized field — we map created_at → timestamp for display
   timestamp: string;
   total_pnl: number;
+  daily_pnl?: number;
+  daily_loss_pct?: number;
   win_rate: number;
-  active_strategy: Strategy;
+  total_trades?: number;
+  open_positions?: number;
+  active_strategy?: Strategy;
+  market_condition?: string;
   capital: number;
+  pair?: string;
+  is_running?: boolean;
+  is_paused?: boolean;
+  pause_reason?: string | null;
   binance_balance?: number;
   delta_balance?: number;
-  delta_balance_inr?: number;
+  delta_balance_inr?: number | null;
   binance_connected?: boolean;
   delta_connected?: boolean;
-  bot_state?: 'running' | 'paused';
+  bot_state?: 'running' | 'paused' | 'error';
   uptime_seconds?: number;
   shorting_enabled?: boolean;
   leverage_level?: number;
+  leverage?: number;
   active_strategies_count?: number;
+  active_strategy_count?: number;
 }
 
 export interface BotCommand {
@@ -81,31 +107,40 @@ export interface StrategyStats {
   last_active: string;
 }
 
+// --- Supabase View Types (matching actual DB columns) ---
+
 export interface OpenPosition {
   id: string;
-  timestamp: string;
+  opened_at: string;
   pair: string;
   side: 'buy' | 'sell';
-  price: number;
+  entry_price: number;
   amount: number;
+  cost?: number;
   strategy: Strategy;
-  pnl: number;
   exchange: Exchange;
   leverage: number;
   position_type: PositionType;
   effective_exposure: number;
-  stop_loss?: number;
-  take_profit?: number;
+  reason?: string;
+  order_id?: string;
+  // Optional fields that the view or component may provide
   current_price?: number;
+  pnl?: number;
+  stop_loss?: number | null;
+  take_profit?: number | null;
 }
 
 export interface PnLByExchange {
   exchange: Exchange;
   total_trades: number;
+  open_trades?: number;
+  closed_trades?: number;
   wins: number;
   losses: number;
-  win_rate: number;
+  win_rate_pct: number;
   total_pnl: number;
+  avg_pnl_pct?: number;
 }
 
 export interface FuturesPosition {
@@ -136,10 +171,12 @@ export interface StrategyPerformance {
   strategy: Strategy;
   exchange: Exchange;
   total_trades: number;
+  closed_trades?: number;
   wins: number;
   losses: number;
   win_rate_pct: number;
   total_pnl: number;
+  avg_pnl_pct?: number;
   best_trade: number;
   worst_trade: number;
 }

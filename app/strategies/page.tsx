@@ -11,6 +11,8 @@ import {
   formatTimeAgo,
   formatDate,
   getStrategyColor,
+  getStrategyLabel,
+  getStrategyBadgeVariant,
   getExchangeLabel,
   getExchangeColor,
   cn,
@@ -21,28 +23,15 @@ import type { Strategy, Trade } from '@/lib/types';
 // Constants
 // ---------------------------------------------------------------------------
 
-const STRATEGIES: Strategy[] = ['Grid', 'Momentum', 'Arbitrage', 'futures_momentum'];
-
-const STRATEGY_BADGE_VARIANT: Record<Strategy, 'blue' | 'warning' | 'purple'> = {
-  Grid: 'blue',
-  Momentum: 'warning',
-  Arbitrage: 'purple',
-  futures_momentum: 'warning',
-};
-
-const STRATEGY_LABELS: Record<Strategy, string> = {
-  Grid: 'Grid',
-  Momentum: 'Momentum',
-  Arbitrage: 'Arbitrage',
-  futures_momentum: 'Futures Momentum',
-};
+const STRATEGIES: Strategy[] = ['momentum', 'futures_momentum', 'grid', 'scalp'];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function computeStats(trades: Trade[], strategy: Strategy) {
-  const filtered = trades.filter((t) => t.strategy === strategy);
+  const normalizedStrategy = strategy.toLowerCase();
+  const filtered = trades.filter((t) => t.strategy.toLowerCase() === normalizedStrategy);
   const wins = filtered.filter((t) => t.pnl > 0).length;
   const losses = filtered.filter((t) => t.pnl < 0).length;
   const totalPnL = filtered.reduce((sum, t) => sum + t.pnl, 0);
@@ -80,7 +69,7 @@ function computeStats(trades: Trade[], strategy: Strategy) {
 
 export default function StrategiesPage() {
   const { trades, strategyLog, strategyPerformance } = useSupabase();
-  const [activeTab, setActiveTab] = useState<Strategy>('Grid');
+  const [activeTab, setActiveTab] = useState<Strategy>('grid');
 
   const statsMap = useMemo(() => {
     const map = {} as Record<Strategy, ReturnType<typeof computeStats>>;
@@ -118,7 +107,7 @@ export default function StrategiesPage() {
               style={{ borderLeftColor: color, borderLeftWidth: 4 }}
             >
               <h3 className="text-lg font-semibold text-white mb-4">
-                {STRATEGY_LABELS[strategy]}
+                {getStrategyLabel(strategy)}
               </h3>
 
               <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
@@ -208,8 +197,8 @@ export default function StrategiesPage() {
                     )}
                   >
                     <td className="py-2.5 pr-4">
-                      <Badge variant={STRATEGY_BADGE_VARIANT[sp.strategy] ?? 'default'}>
-                        {STRATEGY_LABELS[sp.strategy] ?? sp.strategy}
+                      <Badge variant={getStrategyBadgeVariant(sp.strategy)}>
+                        {getStrategyLabel(sp.strategy)}
                       </Badge>
                     </td>
                     <td className="py-2.5 pr-4">
@@ -252,7 +241,7 @@ export default function StrategiesPage() {
                   : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800',
               )}
             >
-              {STRATEGY_LABELS[strategy]}
+              {getStrategyLabel(strategy)}
             </button>
           ))}
         </div>
@@ -284,8 +273,8 @@ export default function StrategiesPage() {
                     </p>
                     <div className="flex flex-wrap items-center gap-2 mb-1">
                       <Badge variant="default">{entry.market_condition}</Badge>
-                      <Badge variant={STRATEGY_BADGE_VARIANT[entry.strategy_selected] ?? 'default'}>
-                        {STRATEGY_LABELS[entry.strategy_selected] ?? entry.strategy_selected}
+                      <Badge variant={getStrategyBadgeVariant(entry.strategy_selected)}>
+                        {getStrategyLabel(entry.strategy_selected)}
                       </Badge>
                     </div>
                     <p className="text-sm text-zinc-300">{entry.reason}</p>

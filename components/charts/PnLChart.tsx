@@ -11,7 +11,7 @@ import {
   ReferenceLine,
 } from 'recharts';
 import { useSupabase } from '@/components/providers/SupabaseProvider';
-import { formatCurrency, formatShortDate } from '@/lib/utils';
+import { formatCurrency, formatShortDate, getStrategyLabel } from '@/lib/utils';
 import type { Trade, Strategy } from '@/lib/types';
 
 interface PnLChartProps {
@@ -44,15 +44,7 @@ function CustomTooltip({ active, payload }: CustomTooltipProps) {
   );
 }
 
-function getStrategyLabel(strategy: Strategy): string {
-  switch (strategy) {
-    case 'Grid': return 'Grid';
-    case 'Momentum': return 'Momentum';
-    case 'Arbitrage': return 'Arbitrage';
-    case 'futures_momentum': return 'Futures Momentum';
-    default: return strategy;
-  }
-}
+// getStrategyLabel is now imported from @/lib/utils
 
 export function PnLChart({ trades: tradesProp, strategy }: PnLChartProps) {
   const { trades: contextTrades } = useSupabase();
