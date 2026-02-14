@@ -52,8 +52,8 @@ export function LiveStatusBar() {
   const deltaBalance = botStatus?.delta_balance || 0;
   const deltaBalanceInr = botStatus?.delta_balance_inr;
 
-  // Total capital: prefer bot_status.capital, then sum of exchange balances
-  const totalCapital = botStatus?.capital ?? (binanceBalance + deltaBalance);
+  // Total capital: sum of actual exchange balances (capital field is just initial config)
+  const totalCapital = (binanceBalance + deltaBalance) || botStatus?.capital || 0;
 
   const shortingEnabled = botStatus?.shorting_enabled ?? false;
   const leverageLevel = botStatus?.leverage_level ?? 1;
